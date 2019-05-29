@@ -597,8 +597,17 @@
 	    else                                                                
 	      read_index <= read_index;                                         
 	  end                                                                   
-	                                                                        
-	                                                                        
+	        
+	reg [31:0] disp_cache[255:0];                                                                
+	always @(posedge M_AXI_ACLK) begin
+		if (M_AXI_ARESETN == 0) begin
+	// reset
+
+		end
+		else if (M_AXI_RVALID && axi_rready) begin
+			disp_cache[ + read_index] <= M_AXI_RDATA;
+		end
+	end                                                            
 	/*                                                                      
 	 The Read Data channel returns the results of the read request          
 	                                                                        
