@@ -9,7 +9,7 @@
 		// Do not modify the parameters beyond this line
 
 		// Base address of targeted slave
-		parameter  C_M_TARGET_SLAVE_BASE_ADDR	= 32'h40000000,
+		parameter  C_M_TARGET_SLAVE_BASE_ADDR	= 32'h00000000,
 		// Burst Length. Supports 1, 2, 4, 8, 16, 32, 64, 128, 256 burst lengths
 		parameter integer C_M_AXI_BURST_LEN	= 16,
 		// Thread ID Width
@@ -152,7 +152,13 @@
 		input wire  M_AXI_RVALID,
 		// Read ready. This signal indicates that the master can
     // accept the read data and response information.
-		output wire  M_AXI_RREADY
+		output wire  M_AXI_RREADY,
+
+		input wire S_ADDR_IN,
+
+		output wire valid,
+
+		output wire ready,
 	);
 
 
@@ -232,6 +238,9 @@
 	reg  	init_txn_ff;
 	reg  	init_txn_ff2;
 	reg  	init_txn_edge;
+
+	
+
 	wire  	init_txn_pulse;
 
 
@@ -286,6 +295,9 @@
 	//Burst size in bytes
 	assign burst_size_bytes	= C_M_AXI_BURST_LEN * C_M_AXI_DATA_WIDTH/8;
 	assign init_txn_pulse	= (!init_txn_ff2) && init_txn_ff;
+
+	assign valid = M_AXI_RVALID;
+	assign ready = M_AXI_RREADY;
 
 
 	//Generate a pulse to initiate AXI transaction.
@@ -545,7 +557,7 @@
 	  begin                                                              
 	    if (M_AXI_ARESETN == 0 || init_txn_pulse == 1'b1)                                          
 	      begin                                                          
-	        axi_araddr <= 'b0;                                           
+	        axi_araddr <= S_ADDR_IN;                                           
 	      end                                                            
 	    else if (M_AXI_ARREADY && axi_arvalid)                           
 	      begin                                                          

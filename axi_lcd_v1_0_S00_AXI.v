@@ -94,7 +94,11 @@
 
 		output wire AXI_START_PULSE,
 
-		input wire [31:0] RDATA
+		input wire [31:0] RDATA,
+
+		input wire valid,
+
+		input wire ready
 	);
 
 
@@ -138,6 +142,8 @@
 
 	reg init_done;
 	reg start_pulse;
+
+	reg [1:0] my_lcd_ctrl;
 	// I/O Connections assignments
 
 	assign S_AXI_AWREADY	= axi_awready;
@@ -451,18 +457,150 @@
 
 
 	 lcd_driver lcd_driver_inst(	        .clk(S_AXI_ACLK),
-							.reset(S_AXI_ARESETN),					
-							.data(RDATA),
-							.lcd_data(lcd_data),
-							.rst(rst),
-							.cs(cs),
-							.rs(rs),
-							.wr(wr),
-							.rd(rd),                          
-                            .lcd_ctrl(LCD_CTRL)
+											.reset(S_AXI_ARESETN),					
+											.data(RDATA),
+											.lcd_data(lcd_data),
+											.rst(rst),
+											.cs(cs),
+											.rs(rs),
+											.wr(wr),
+											.rd(rd),                          
+                            				.lcd_ctrl(my_lcd_ctrl)
     );
 
+	always @(posedge S_AXI_ACLK) begin
+		if (S_AXI_ARESETN) begin
+			// reset
+			my_lcd_ctrl <= 2'b00;
+			start_init_done <= 0;
+			start_frame_done <= 0;
+		end
+		else if(~(valid & ready)) begin
+			my_lcd_ctrl <= 2'b00;
+		end
+		else if ((valid & ready ) && start_init) begin
+			my_lcd_ctrl <= 2'b01;
+			start_init_done <= 1;			
+		end
+		else if((valid & ready ) && start_init == 0 && LCD_CTRL[0] == 1) begin
+			my_lcd_ctrl <= 2'b10;
+		end			
+		else if((valid & ready) && tx == 1 && mst_exec_state == START_FRAME) begin
+			my_lcd_ctrl <= 2'b01;
+			start_frame_done <= 1;
+		end
+		else if((valid & ready) && tx == 1 && mst_exec_state == TRANS) begin
+			my_lcd_ctrl <= 2'b10;
+			start_frame_done <= 1;
+		end
+	end
 
-	
+	reg start_init;
+	reg start_init_done;
+	reg start_frame;
+	reg start_frame_done;
+	reg mst_exec_state;
+	reg init_txn_ff2;
+	reg init_txn_ff;
+	reg tx;
+	reg [1:0] init_count;
+	assign start_frame	= (!init_txn_ff2) && init_txn_ff;
+	always @(posedge S_AXI_ACLK)										      
+	  begin                                                                        
+	    // Initiates AXI transaction delay    
+	    if (S_AXI_ARESETN == 0 )                                                   
+	      begin                                                                    
+	        init_txn_ff <= 1'b0;                                                   
+	        init_txn_ff2 <= 1'b0;                                                   
+	      end                                                                               
+	    else                                                                       
+	      begin  
+	        init_txn_ff <= LCD_CTRL[2];
+	        init_txn_ff2 <= init_txn_ff;                                                                 
+	      end                                                                      
+	end   
+
+	always @ ( posedge S_AXI_ACLK)                                                                            
+	  begin                                                                                                     
+	    if (S_AXI_ARESETN == 1'b0 )                                                                             
+	      begin                                                                                                                    
+	        mst_exec_state      <= IDLE;
+	        start_init <= 0;  
+	        init_done <= 0; 
+	        init_count <= 2'b00;                                                             
+	          
+	      end                                                                                                   
+	    else                                                                                                    
+	      begin                                                                                                	                                                                                                            
+	        // state transition                                                                                 
+	        case (mst_exec_state)                                                                               
+	                                                                                                            
+	          IDLE:                                                                                     
+	            // This state is responsible to wait for user defined C_M_START_COUNT                           
+	            // number of clock cycles.                                                                      
+	            if ( LCD_CTRL[0] == 1'b1)                                                      
+	              begin                                                                                         
+	                mst_exec_state  <= START_INIT;                                                              
+	              end
+	            else if( init_done )begin
+	            	mst_exec_state <= TRANS;
+	            end                                                                                           
+	            else                                                                                            
+	              begin                                                                                         
+	                mst_exec_state  <= IDLE;                                                            
+	              end                                                                                           
+	          START_INIT:
+	          	if(start_init_done) begin
+	          		mst_exec_state <= INIT_WRITE;
+	          		start_init <= 0;
+	          		start_pulse <= 0;
+	          	end
+	          	else begin
+	          		start_init <= 1;
+	          		mst_exec_state <= START_INIT;
+	          		start_pulse <= 1;
+	          	end
+	          	
+
+	          INIT_WRITE:                                                                                       
+	             if(LCD_CTRL[0] == 1'b0) begin
+	             	mst_exec_state <= TRANS;
+	             	init_done <= 1;
+	             	start_init <= 0;	             	
+	             end
+	          
+	             else begin
+	             	init_done <= 0;
+	             	mst_exec_state <= INIT_WRITE;
+	             end
+
+	                                                                                                 
+	          TRANS:
+	             if ( start_frame ) begin
+	             	mst_exec_state <= START_FRAME;
+	             end                                                                                        
+                 else if(LCD_CTRL[1] == 1'b1) begin
+                 	mst_exec_state <= TRANS;
+                 	
+                 end                
+                 else  begin
+                 	tx <= 0;
+                 end                              
+              START_FRAME:
+              	if(start_frame_done) begin
+              		mst_exec_state <= TRANS; 
+              	end
+              	else begin
+              		tx <= 1; 
+              		mst_exec_state <= START_FRAME;     
+              	end
+              
+	          default:                                                                                         
+	            begin                                                                                           
+	              mst_exec_state  <= IDLE;                                                              
+	            end                                                                                             
+	        endcase                                                                                             
+	      end                                                                                                   
+	  end //MASTER_EXECUTION_PROC        
 
 	endmodule
